@@ -66,6 +66,8 @@ def call_openai_assembly_manual(
 ) -> None:
     """
     組立説明テキストを OpenAI Chat Completions（ビジョン）で生成し out_path に保存する。
+    prompt.txt には API に送るテキスト指示だけを保存する（画像の base64 等は含めない）。
+    画像は API リクエストの別パーツとしてのみ添付する。
     依存: pip install openai
     """
     try:
@@ -77,15 +79,18 @@ def call_openai_assembly_manual(
         f"パーツ{i}：{part_names[i]}" for i in range(len(part_names))
     )
     text = (
-        f"添付の1枚目の画像は、{instance_name}（インスタンス名）の画像です。"
-        f"2枚目の画像は、1枚目の{instance_name}（インスタンス名）をそれぞれの部品に分けた状態の画像です。"
+        "【重要】添付画像は製品・部品の3DCGレンダリング（合成画像）であり、"
+        "実在する人物の写真ではありません。人物の特定・識別・プライバシーに関する依頼は一切ありません。\n"
+        "回答は必ず「STEP1：」から始めてください。謝罪、前置き、方針説明、人物に関する注釈は一切書かないでください。\n\n"
+        f"添付の1枚目の画像は、{instance_name}の画像です。"
+        f"2枚目の画像は、1枚目の{instance_name}をそれぞれの部品に分けた状態の画像です。"
         "2枚の画像で、同じ部品は同じインデックスを表示しています。"
-        "この物体の組み立て手順を、説明書風に書いてください。\n"
+        "この物体の組み立て手順のみを、説明書風に書いてください。\n"
         "出力では、太文字にするためのアスタリスクを使わないでください。"
         "パーツの名称は、一般的な名称ではなく「パーツ0」「パーツ1」のように書いてください。\n"
         "また、それぞれのパーツは次のとおりです。\n"
         f"{part_lines}\n\n"
-        "以下が出力形式\n"
+        "以下が出力形式（この見出し行や区切り線は出力に含めず、STEP1 からのみ出力）\n"
         "------------------------------\n"
         "STEP1：\n"
         "1.〇〇\n"
@@ -96,6 +101,15 @@ def call_openai_assembly_manual(
         "....\n"
         "STEPN：\n"
     )
+    system_msg = (
+        "あなたは工業製品の組立説明を書くアシスタントです。"
+        "入力画像は部品のCGレンダリングであり、人物の顔や身元の識別は求められていません。"
+        "人物識別への拒否や謝罪文は出力せず、指定の形式で組立手順だけを日本語で述べてください。"
+    )
+
+    # ログ用: テキストのみ。画像は write_text には含めない。
+    prompt_path = out_path.parent / "prompt.txt"
+    prompt_path.write_text(text, encoding="utf-8")
 
     url1 = _png_file_to_data_url(assembled_annot)
     url2 = _png_file_to_data_url(disassembled_annot)
@@ -104,14 +118,19 @@ def call_openai_assembly_manual(
     resp = client.chat.completions.create(
         model=model,
         messages=[
+            {"role": "system", "content": system_msg},
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": text},
+                    {"type": "text", "text": "【1枚目：組立後】"},
+                    {"type": "image_url", "image_url": {"url": url1}},
+                    {"type": "text", "text": "【2枚目：ばらした状態】"},
+                    {"type": "image_url", "image_url": {"url": url2}},
                 ],
-            }
+            },
         ],
-        max_tokens=4096,
+        max_tokens=8192,
     )
     content = resp.choices[0].message.content
     if not content:
@@ -414,7 +433,7 @@ def main():
     parser.add_argument(
         "--openai",
         action="store_true",
-        help="レンダ後に OpenAI API で組立説明テキストを生成し assembly_manual_openai.txt に保存する（要 pip install openai と API キー）",
+        help="レンダ後に OpenAI API で組立説明を生成し assembly_manual_openai.txt と prompt.txt に保存する（要 pip install openai と API キー）",
     )
     parser.add_argument("--openai_model", default="gpt-4o-mini", help="ビジョン対応モデル名")
     parser.add_argument(
