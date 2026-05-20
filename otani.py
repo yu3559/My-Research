@@ -1758,6 +1758,7 @@ def compute_text_latent_energy(
         return None, info
     head.eval()
 
+    ##
     with torch.no_grad():
         t = torch.from_numpy(text_emb).float()
         part = vecs0.detach().cpu().float()
